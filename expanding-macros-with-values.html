@@ -1,0 +1,411 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Expanding Macros with Values Instead of Names</title>
+  <style>
+    body {
+      margin: 2em 0 2em 4em;
+      max-width: 40em;
+      font-size: 20px;
+      font-family: -apple-system;
+      line-height: 1.6;
+    }
+
+    h1 {
+      font-size: 1.4em;
+    }
+
+    code {
+      background-color: rgba(0,0,0,0.04);
+      padding: 0.2em 0 0.2em 0;
+      border-radius: 3px;
+    }
+
+    pre {
+      margin-left: 3em;
+      line-height: 1.3;
+    }
+
+    .outline {
+      outline: 1px solid black;
+    }
+  </style>
+</head>
+<body>
+
+ <h1>Expanding Macros with Values Instead of Names</h1>
+
+ <p>
+   In
+   <a href="https://github.com/awwx/arc-globals-in-table#readme">Implementing
+   Arc Global Variables with an Arc Table</a> I described how it was a
+   small change to modify Arc<sub>3.1</sub> so that global variables
+   were stored in a plain Arc table.
+ </p>
+
+ <p>
+   This is nice for taking an
+   <a href="http://www.paulgraham.com/ilc03.html">axiomic</a> approach
+   to language design, since there’s now one less feature needed to
+   implement the core language: Arc<sub>3.1</sub> uses both Racket
+   namespaces and Arc tables, and with this change Arc no longer has a
+   dependency on namespaces.
+ </p>
+
+ <p>
+   A module system for <i>functions</i> can now be built using the core
+   language, rather than having to be built into it.
+ </p>
+
+ <p>
+   For example, suppose I use <code>alref</code> in my code but
+   not <code>assoc</code>, and perhaps I even want to use the
+   name <code>assoc</code> for something else in my own code.
+ </p>
+
+ <pre>(def assoc (key al)
+  (if (atom al)
+       nil
+      (and (acons (car al)) (is (caar al) key))
+       (car al)
+      (assoc key (cdr al))))
+
+(def alref (al key)
+  (cadr (assoc key al)))</pre>
+
+ <p>
+  I can load a library which implements <code>assoc</code>
+  and <code>alref</code> into its own module (that is, use a different
+  Arc table for its global variables), and then copy only
+  <code>alref</code> into my own globals.
+ </p>
+
+ <pre>(= lib (copy globals))
+(load "assoc.arc" lib)
+(= globals!alref lib!alref)</pre>
+
+ <p>
+  I now have a reference to <code>alref</code>, which in turn has a
+  reference to <code>assoc</code>, which is in its global variables but
+  not mine.
+ </p>
+
+ <p>
+  Using these primitives I can create my own module system, defining
+  perhaps <code>require</code> and <code>export</code>, or however I’d
+  like my module system to work.
+ </p>
+
+ <p>
+  Sadly though while this works fine for functions, it breaks down for
+  <i>macros</i>.
+ </p>
+
+ <p>
+  Suppose I’d like to use the <code>after</code> macro,
+ </p>
+
+ <pre>(mac after (x . ys)
+  `(protect (fn () ,x) (fn () ,@ys)))</pre>
+
+ <p>
+   but I don’t myself use <code>protect</code>, and so I’d rather not
+   have to import it as well.
+ </p>
+
+ <p>
+   If I try
+ </p>
+
+ <pre>(= globals!after lib!after)</pre>
+
+ <p>
+   I can go ahead and use the macro...
+ </p>
+
+ <pre>(after (open-and-process-it) (close-it))</pre>
+
+ <p>
+  but it will expand into code which uses <code>protect</code>:
+ </p>
+
+ <pre>(protect
+  (fn () (open-and-process-it))
+  (fn () (close-it)))</pre>
+
+ <p>
+   Since my code doesn’t have a reference to <code>protect</code> (or
+   I’d like to be able to use “protect” in my own code for something
+   else), that reference to <code>protect</code> isn’t referring to
+   the “protect” in the library.
+ </p>
+
+ <p>
+  In Scheme the solution is “hygienic” macros: since macros operate on
+  expressions, the macro expander can automatically rename things like
+  “protect” so that they don’t conflict with what I might be using
+  “protect” for:
+ </p>
+
+ <pre>(gs4926-protect
+  (fn () (open-and-process-it))
+  (fn () (close-it)))</pre>
+
+ <p>
+  where “gs4926-protect” is some unique name that doesn’t conflict
+  with any of the names I’m using.  I’d still need to have
+  “gs4926-protect” in my own globals (which may make having the
+  ability to have separate global variables fairly useless if
+  everything can be renamed anyway), but at least I can use “protect”
+  for something of my own.
+ </p>
+
+ <p>
+   Hygienic macros turn out to be pretty painful to use, and so for
+   some of us it’s a solution worse than the problem.  It’s annoying
+   if a library is making use some name like “protect” which I want to
+   use myself, but I can just go into the library and rename “protect”
+   in that library to something else if I want to.
+ </p>
+
+ <p>
+   In Clojure the backquote character <code>`</code> is a “syntax
+   quote”, which expands plain symbols into “fully qualified
+   symbols” which include a namespace:
+ </p>
+
+ <pre>
+user=> `(a b c)
+(user/a user/b user/c)</pre>
+
+ <p>
+   and <code>`(protect ...)</code> in the library would expand into
+   something like <code>(lib/protect ...)</code>, where “lib” is the
+   namespace of the library.
+ </p>
+
+ <p>
+  Like hygienic macros, Clojure’s syntax quote solves the problem of
+  name clashes by renaming.  It’s a nicer solution than hygienic
+  macros, though it does come at the cost of making <code>`</code> no
+  longer a simple abbreviation for creating lists.
+ </p>
+
+ <p>
+   In Arc:
+ </p>
+
+ <pre>arc&gt; `(a ,(+ 3 4) b)
+(a 7 b)
+arc&gt; (list 'a (+ 3 4) 'b)
+(a 7 b)
+arc&gt; (is (car `(a)) 'a)
+t</pre>
+
+ <p>
+  In Clojure:
+ </p>
+
+ <pre>user=> `(a ~(+ 3 4) b)
+(user/a 7 user/b)
+user=> (= (first `(a)) 'a)
+false</pre>
+
+ <br>
+
+ <p>
+  It’s a shame, as we have a small set of language axioms...
+ </p>
+
+ <ul>
+  <li>“Global” variables are simply a reference to values stored in a
+  plain Arc table.</li>
+
+  <li>“Modules” can be created simply by using a different Arc table
+  for the globals in the “module”.</li>
+
+  <li>Quasiquotation is a simple abbreviation for constructing plain
+  lists.</li>
+
+  <li>Macros transform source code expressions into source code expressions.</li>
+ </ul>
+
+ <p>
+  which seems to <i>almost</i> work for a module system... but doesn’t
+  quite manage it for macros.
+ </p>
+
+ <p>
+  In the expansion of the <code>after</code> macro, we want “protect”
+  to refer to the “protect” function in the library:
+ </p>
+
+ <pre>(protect
+  (fn () (open-and-process-it))
+  (fn () (close-it)))</pre>
+
+ <p>
+  while not clashing with my using “protect” for something else in my
+  code.
+ </p>
+
+ <p>
+  With hygienic macros “protect” is automatically renamed to some
+  unique name that doesn’t clash with my code, and in Clojure the
+  name is made unique by prefixing it with a namespace.
+ </p>
+
+ <p>
+  And with that unique name, the code is able to get a reference to
+  the function value, and to call it.
+ </p>
+
+ <pre>(mac after (x . ys)
+  `(protect (fn () ,x) (fn () ,@ys)))</pre>
+
+ <p>
+  Since the end result that’s needed is to get at the function value,
+  rather than having the macro expand into the <i>name</i> of the
+  function (and then for us later to get the value from name), why not
+  instead have the macro expand into the function value itself...?
+ </p>
+
+ <pre>(mac after (x . ys)
+  `(<span class="outline"><b>,</b></span>protect (fn () ,x) (fn () ,@ys)))</pre>
+
+ <p>
+  This violates the principle that macros transform source code
+  expressions into source code expressions.  If we look at the macro
+  expansion:
+ </p>
+
+ <pre>arc&gt; (macex1 '(after (open-and-process-it) (close-it)))
+(<span class="outline">#&lt;procedure:protect&gt;</span> (fn nil (open-and-process-it)) (fn nil (close-it)))</pre>
+
+ <p>
+  that’s no longer a source code expression that we could type into an
+  editor or save to a file.  It has the procedure <i>value</i> in the
+  first list element:
+ </p>
+
+ <pre>arc&gt; (type (car (macex1 '(after (open-and-process-it) (close-it)))))
+fn</pre>
+
+ <p>
+  Arc<sub>3.1</sub> doesn’t like it either...
+ </p>
+
+ <pre>arc&gt; (after (open-and-process-it) (close-it))
+Error: "Bad object in expression #&lt;procedure:protect&gt;"</pre>
+
+ <p>
+  An error which is generated by the compiler:
+ </p>
+
+ <pre>(define (ac s env)
+  (cond ((string? s) (ac-string s env))
+        ((literal? s) s)
+        ((eqv? s 'nil) (list 'quote 'nil))
+        ...
+        (#t (err "Bad object in expression" s))))</pre>
+
+ <p>
+  Oh, but we can fix that!&emsp;:-)
+ </p>
+
+ <pre>(define (ac s env)
+  (cond ((string? s) (ac-string s env))
+        ((literal? s) s)
+        ((eqv? s 'nil) (list 'quote 'nil))
+        ...
+        (#t s)))</pre>
+
+ <p>
+  Now anything that isn’t otherwise recognized by the compiler is
+  passed through unchanged, much like strings and numbers are.
+ </p>
+
+ <pre>arc&gt; (mac after (x . ys)
+  `(,protect (fn () ,x) (fn () ,@ys)))
+#(tagged mac #&lt;procedure: after&gt;)
+
+arc&gt; (def open-and-process-it () (prn "open and process it") nil)
+#&lt;procedure: open-and-process-it&gt;
+
+arc&gt; (def close-it () (prn "close it") nil)
+#&lt;procedure: close-it&gt;
+
+arc&gt; (after (open-and-process-it) (close-it))
+open and process it
+close it
+nil</pre>
+
+ <p>
+  There’s another change to make if we also want to also be able to
+  not only inject function values into the expansion of a macro, but
+  also to be able to inject <i>macro</i> values.
+ </p>
+
+ <pre>(mac n-of (n expr)
+  (w/uniq ga
+    `(<span class="outline">,</span>let ,ga nil
+       (<span class="outline">,</span>repeat ,n (<span class="outline">,</span>push ,expr ,ga))
+       (<span class="outline">,</span>rev ,ga))))</pre>
+
+ <p>
+  Arc<sub>3.1</sub> looks to see if a symbol is a macro by
+  checking whether there’s a global variable of that name, which has a
+  macro as its value.
+ </p>
+
+ <pre>; returns #f or the macro function
+
+(define (ac-macro? fn)
+  (if (symbol? fn)
+      (let ((v (namespace-variable-value (ac-global-name fn)
+                                         #t
+                                         (lambda () #f))))
+        (if (and v
+                 (ar-tagged? v)
+                 (eq? (ar-type v) 'mac))
+            (ar-rep v)
+            #f))
+      #f))</pre>
+
+ <p>
+  To allow macro values to be injected into
+  expressions, <code>ac-macro?</code> needs to be extended to also
+  return true when <code>fn</code> is itself a macro value.
+ </p>
+
+ <p>
+  In summary, to review our language axioms:
+ </p>
+
+ <ul>
+  <li>Global variables are a reference to values stored in a
+  plain Arc table.</li>
+
+  <li>“Modules” can be created by using a different Arc table
+  for the globals in the “module”.</li>
+
+  <li>Quasiquotation is an abbreviation for constructing plain lists.</li>
+
+  <li><del>Macros transform source code expressions into source code expressions.</del>
+ </ul>
+
+ <p>
+  By dropping one of our axioms, we can build a module system that
+  works for both functions and macros entirely on top of these simpler
+  features, and without having to do any renaming.
+ </p>
+
+ <br><hr>
+
+ <small><a href="https://github.com/awwx">github/awwx</a></small>
+
+</body>
+</html>
