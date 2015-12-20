@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width">
+  <title>Arc Macro Expander</title>
+  <link href="style.css" rel="stylesheet">
+</head>
+<body>
+
+ <h1>Arc Macro Expander</h1>
+
+ <p>
+  I implemented an
+  <a href="https://github.com/awwx/arc-macro">Arc macro expander</a>
+  with these goals:
+ </p>
+
+ <ul>
+  <li>
+   The macro expander runs as a separate phase before the Arc
+   compiler, fully expanding all the macros in the source form.  The
+   Arc compiler receives code that has been fully macro expanded, and
+   so only needs to implement compiling primitive forms such
+   as <code>fn</code>, <code>if</code>, <code>quote</code>, <code>assign</code>,
+   and function calls.
+  </li>
+
+  <li>
+   The macro expander tracks which variables are lexical variables and
+   which are globals.  References to global variables are expanded
+   into macros, which in turn can chose how to implement global
+   variables: whether as global variables in a Racket namespace like
+   Arc<sub>3.1</sub> does, or by storing global variables in an Arc
+   table.  This further simplifies the Arc compiler because it also no
+   longer needs to keep track of lexical variables.
+  </li>
+
+  <li>
+   The macro expander also supports injecting values (such as function
+   values and macro values) into the result of a macro expansion.  In
+   <a href="http://awwx.github.io/expanding-macros-with-values.html">
+   Expanding Macros with Values Instead of Names</a> I describe how
+   this appears to support importing and exporting macros from modules
+   without having to use namespaces.
+  </li>
+
+  <li>
+   To explore the feasibility of writing a cross-compiler when macro
+   expansions can contain injected values, I wrote a demo Arc to
+   Racket cross-compiler and target runtime.
+  </li>
+
+ </ul>
+
+ <p>And 28 days of debugging later...</p>
+
+ <h2>Rationale</h2>
+
+ <p>
+  In Arc<sub>3.1</sub>, the macro expander is written in Scheme
+  as part of the compiler, which means that it needs to worry
+  about the difference between Arc lists and Scheme lists:
+ </p>
+
+ <pre>
+  ; macros return Arc lists, ending with NIL.
+  ; but the Arc compiler expects Scheme lists, ending with '().
+  ; what to do with (is x nil . nil) ?
+  ;   the first nil ought to be replaced with 'NIL
+  ;   the second with '()
+  ; so the rule is: NIL in the car -> 'NIL, NIL in the cdr -> '().
+  ;   NIL by itself -> NIL
+ </pre>
+
+ <p>
+  If would be simpler if the macro expander could run first and
+  completely expand all the macros in the source code expression, and
+  then pass the fully expanded code to the compiler:
+ </p>
+
+ <ul>
+  <li>
+   The macro expander could live entirely in the Arc universe,
+   expanding Arc lists to Arc lists, without worrying about the
+   underlying representation of Arc lists vs. the host language.
+  </li>
+
+  <li>
+   The compiler might also be able to be simpler, if macro expansion
+   wasn’t one if the tasks it need to do.
+  </li>
+
+  <li>
+   Maybe new ideas in macro expansion, such as my
+   <a href="http://awwx.github.io/expanding-macros-with-values.html">
+   Expanding Macros into Values</a>, could be experimented with by
+   just changing the macro expansion code without needing to get into
+   the compiler.
+  </li>
+ </ul>
+
+ <p>
+  For the macro expander to be able to fully expand all the macros in
+  an expression, like the compiler it would need to know about the
+  syntax of Arc’s primitive forms.  For example, in
+ </p>
+
+ <pre>
+  (fn (foo x)
+    (bar y))
+ </pre>
+
+ <p>
+  the macro expander would need to know that it should macro
+  expand <code>(bar y)</code> but not <code>(foo x)</code>.  Likewise,
+  with optional arguments:
+ </p>
+
+ <pre>
+  (fn ((o foo (bar))) ...)
+ </pre>
+
+ <p>
+  <code>o</code> and <code>foo</code> shouldn’t be macro expanded
+  but <code>(bar)</code> should.
+ </p>
+
+ <p>
+  So we’ve got some redundancy here between the macro expander and the
+  compiler, where both need to know about optional arguments.  Can we
+  make the code simpler by removing this redundancy somehow?
+ </p>
+
+ <p>
+  Suppose <code>fn</code> was itself a macro which implemented
+  optional arguments and argument destructuring, expanding into some more
+  primitive “$fn” which only knows about plain arguments:
+ </p>
+
+ <pre>
+  (mac fn (args . body)
+    (if (fn-complex-args? args)
+         (fn-complex-fn args (fn-body body))
+         `($fn ,args ,@(fn-body body))))
+ </pre>
+
+ <p>
+  The implementation of <code>fn-complex-fn</code> turns out to be
+  straightforward translation of <code>ac-complex-fn</code> in
+  ac.scm to Arc.
+ </p>
+
+ <p>
+  At this point, not only does the compiler now not need to know about
+  complex function arguments, neither does the macro expander!  The
+  macro expander does need to know to not expand function arguments in
+  the primitive <code>$fn</code> form, but since <code>fn</code> is a
+  plain macro the macro expander doesn’t need to do anything special
+  with it, just as the macro expander doesn’t need to do anything
+  special to avoid expanding the variables in a <code>with</code>
+  form.
+ </p>
+
+ <pre>
+  (with (foo 0 bar 14)
+    ...)
+ </pre>
+
+ <p>
+  A surprising result of implementing complex args as a macro is that
+  argument destructuring and optional arguments can now be used
+  together:
+ </p>
+
+ <pre>
+  (fn ((o (a b) '(1 2)))
+    ...)
+ </pre>
+
+ <p>
+  I didn’t do anything to make this happen; the Arc<sub>3.1</sub>
+  implementation used Scheme’s <code>let*</code> and the
+  straightforward translation of that was to use
+  Arc’s <code>withs</code>... and since that in turn expands
+  into <code>fn</code> it all just worked.
+ </p>
+
+ <p>
+  Implementing complex args as a macro does make bootstrapping Arc a
+  bit more cumbersome.  The functions used by the macro can’t
+  themselves use complex arguments since they haven’t been implemented
+  yet.  For example, in Arc<sub>3.1</sub> <code>pair</code> looks
+  like:
+ </p>
+
+ <pre>
+  (def pair (xs (o f list))
+    ...)
+ </pre>
+
+ <p>
+  which we now need to do by hand:
+ </p>
+
+ <pre>
+  (def pair (xs . rs)
+    ((fn (f)
+       ...)
+     (if (is rs nil) list (car rs))))
+ </pre>
+
+ <p>
+  Similarly quasiquotation and the expansion of square brackets can
+  also be implemented as macros, with the same tradeoff: it simplifies
+  the macro expander and the compiler, at the cost of making
+  bootstrapping <code>arc.arc</code> more cumbersome since those
+  features can’t be used until enough of Arc has been defined to
+  implement them.
+ </p>
+
+ <h2>Lexical Variables</h2>
+
+ <p>
+  I prefer lexical variables to override macros of the same name.  For
+  example, if I write:
+ </p>
+
+ <pre>
+  (def report (out)
+    (out "Say, you know what?")
+    (out "Rizzledink and pugliquat!"))
+ </pre>
+
+ <p>
+  I prefer my local usage of <code>out</code> to override
+  Arc’s <code>out</code> macro, in the same way as it would override a
+  global function with that name.
+ </p>
+
+ <p>
+  For the macro expander to be able to do this it needs to keep track
+  of which variables in a scope are lexical variables, like the Arc
+  compiler does passing <code>env</code> around in ac and keeping
+  track of which variables have been defined in a <code>fn</code>:
+ </p>
+
+ <pre>
+  (define (ac-fn args body env)
+    ... (append (ac-arglist args) env) ...)
+ </pre>
+
+ <p>
+  It turns out that once the macro expander is keeping track of which
+  variables are lexical, the compiler no longer needs to.
+ </p>
+
+ <p>
+  There are actually a couple options here.
+ </p>
+
+ <h3>With Global Variables in a Table</h3>
+
+ <p>
+  One option is to
+  <a href="https://github.com/awwx/arc-globals-in-table#readme">
+  implement global variables in Arc in an Arc table</a>.  To do this
+  with the macro expander I have references to globals expand into a
+  invocation of a <code>global</code> macro. For example, a global
+  variable reference like the <code>prn</code> in
+ </p>
+
+ <pre>
+  (prn "Hi there")
+ </pre>
+
+ <p>
+  expands to
+ <p>
+
+ <pre>
+  (global pre)
+ </pre>
+
+ <p>
+  The <code>global</code> macro in turn can implemented such as:
+ </p>
+
+ <pre>
+  (mac global (var)
+   `(,globals ',var))
+ </pre>
+
+ <p>
+  so that <code>(prn "Hi there")</code> becomes:
+ </p>
+
+ <pre>
+  ((globals 'prn) "Hi there" )
+ </pre>
+
+ <p>
+  Which is the same as <code>(globals!prn "Hi there")</code>.
+ </p>
+
+ <p>
+  Naturally <code>globals</code> itself can’t itself be a global
+  variable (or we’d get into a infinite loop expanding global variable
+  references), so the macro expander needs to
+  recognize <code>globals</code> as a special form and inject a
+  reference to the Arc table being used to store global variables in
+  the macro expansion.
+ </p>
+
+ <p>
+  When I first noticed that global variables could be stored in a
+  plain table I wondered how terrible it would be not to get an error
+  when referencing an undefined global variable.
+ </p>
+
+ <p>
+  In Arc<sub>3.1</sub> storing <code>nil</code> in a table as a value
+  removes the key, and fetching the value of a key which doesn’t exist
+  returns <code>nil</code>, so there’s no way to distinguish between a
+  global variable that’s been set to <code>nil</code> (such as flags
+  can be) vs. a global variable that hasn’t been defined at all.
+  Referencing an “undefined” global variable simply
+  yields <code>nil</code>.  How bad would that be?
+ </p>
+
+ <p>
+  Pretty terrible it turns out :-) I was surprised how often I
+  mistyped function names, and having such a bug result in nothing
+  more informative than “Function call on inappropriate object nil”
+  led to an irritating debugging session tracking down which function
+  I had misspelled.
+ </p>
+
+ <p>
+  However, if we change Arc tables to store <code>nil</code> values,
+  and add a function such as “has” to tell us whether a table stores a
+  particular key or not, we can extend our <code>global</code> macro
+  to tell us when we’re referencing a global variable that hasn’t been
+  defined:
+ </p>
+
+ <pre>
+  (mac global (var)
+    `(,do (,unless (,bound ',var)
+            (,err "global var not defined:" ',var))
+          (,globals ',var)))
+ </pre>
+
+ <h3>Or, Plain Global Variables</h3>
+
+ <p>
+  But you don’t have to go so far if you don’t want to.  We can still
+  avoid having the compiler need to keep track of which variables are
+  lexical even without making a <code>global</code> macro (or storing
+  global variables in an Arc table).
+ </p>
+
+ <p>
+  Since the macro expander already knows which variables are global variables which which are lexical, it could tag them for the compiler.  For example, it could take
+ </p>
+
+ <pre>
+  (def hi (name)
+    (prn "Hello " name))
+ </pre>
+
+ <p>
+  and expand the body into something like
+ </p>
+
+ <pre>
+  (($global-ref prn) "Hello " ($lex-ref name))
+ </pre>
+
+ <p>
+  where the compiler would know what to do
+  with <code>$global-ref</code> and <code>$lex-ref</code>.  I.e., in
+  Arc<sub>3.1</sub> lexical variables expand as themselves and global
+  variables have an underline prefixed to their name.
+ </p>
+
+ <h2>Implementing the Macro Expander</h2>
+
+ <p>
+  So what language can we write the macro expander in?  Ideally, of
+  course, Arc :-)
+ </p>
+
+ <p>
+  Since the macro expander lives entirely in the Arc universe, it
+  translates Arc lists to Arc lists, and writing in Arc is the
+  simplest way to do that.  Writing it in another language (such as
+  the target laguage that we’re compiling Arc into) would complicate
+  the implementation because it would need to be both implementing the
+  macro expansion algorithm and navigating whatever representation Arc
+  lists had in the particular target runtime.
+ </p>
+
+ <p>
+  Of course writing the macro expander in Arc has the catch-22 that we
+  need a working version of Arc (including a macro expander) to
+  implement the macro expander!
+ </p>
+
+ <p>
+  That’s not a problem if you have a working version of Arc
+  (Arc<sub>3.1</sub>, Anarki, Arc/Nu, etc.), and you want to be
+  running your code in the same runtime.  But if you want to compile
+  to a different target language or to have a different internal
+  representation of Arc lists in your runtime, then you’ll either need
+  to cross-compile the macro expander or translate it by hand.
+ </p>
+
+ <p>
+  There’s a couple of challenges with cross-compilation.  The output
+  of the macro expander includes generated symbols (produced
+  by <code>uniq</code> in Arc) in macro expansion, which need to be
+  unique, different than any variables the user might be using.
+ </p>
+
+ <p>
+  In Lisp the usual way to do this is to have “uninterned” symbols,
+  symbols which aren’t equal to each other (as tested
+  by <code>eq?</code> in Scheme or <code>is</code> in Arc), even if
+  they happen to have the same name.
+ </p>
+
+ <p>
+  But, if I’m cross-compiling, I’m (presumably) generating a source
+  code file in some representation of the target language, and when
+  that gets loaded I’d need references to uniq symbols be properly
+  uninterned.  E.g. perhaps I’d a have a special form like
+  <code>($gensym foo)</code>, and all references to
+  <code>($gensym foo)</code> in a particular source code file would
+  expand into the same uninterned symbol, different than other symbols
+  named <code>foo</code> loaded elsewhere.
+ </p>
+
+ <p>
+  It occurred to me though, if we want to have unique symbols, why not
+  simply generate <i>random</i> symbols, using enough bits of random
+  data so that they’ll be universally unique?
+ </p>
+
+ <pre>
+  (def uniq ()
+    (coerce (rand-string 12) 'sym))
+ </pre>
+
+ <p>
+  This answered another question of mine, what to name the primitives
+  such as <code>$fn</code>.  My hope was that the
+  <a href="http://awwx.github.io/expanding-macros-with-values.html">
+  Expanding Macros with Values</a> approach would allow a programmer
+  to choose their own names for things without worry of conflict (and
+  to do that without having to layer on namespaces).
+ </p>
+
+ <p>
+  Whatever name I give the primitive fn, whether <code>$fn</code> or
+  something else, that name then gets hard-coded into the output of
+  the macro expander and you can’t use that name for your own
+  purposes.
+ </p>
+
+ <p>
+  Ah, but what if the primitives are given random names, globally
+  unique names?  Now there’s no chance of accidental conflict.  You’ll
+  only write code containing the name of the primitive if you’re
+  deliberately copying its name.
+ </p>
+
+ <p>
+  Thus in my implementation of the macro expander the primivites are
+  given names such as <code>$fn--xVrP8JItk2Ot</code>.  I use the
+  double dash to indicate that the first part is intended to be the
+  readable name and the second part the random id which makes it
+  globally unique.
+ </p>
+
+ <p>
+  It’s ugly, but it’s also something I never need to look at when
+  programming.  Only if I want to get into the internals of the macro
+  expander and compiler do I need to see it.
+ </p>
+
+ <h3>fn vs. $fn</h3>
+
+ <p>
+  Using the approach of expanding macros with values, I could
+  implement <code>do</code> with:
+ </p>
+
+ <pre>
+  (mac do body
+    `((,fn () ,@body)))
+ </pre>
+
+ <p>
+  By injecting the value of <code>fn</code> (the macro) by
+  using <code>,fn</code> rather than simply using <code>fn</code>
+  (which would expand into the plain symbol <code>fn</code>), I can
+  both use <code>do</code> in my own code and define <code>fn</code>
+  to be something different with interfering with operation
+  of <code>do</code>.
+ </p>
+
+ <p>
+  The primitive <code>$fn--xVrP8JItk2Ot</code> is different.  It
+  wouldn’t work to say:
+ </p>
+
+ <pre>
+  (mac do body
+    `((,$fn--xVrP8JItk2Ot () ,@body)))
+ </pre>
+
+ <p>
+  because <code>$fn--xVrP8JItk2Ot</code> is not a global variable
+  (like how <code>fn</code> is a global variable named <code>fn</code>
+  which has as its value a macro), and it doesn’t have a value to be
+  injected into the expansion.
+ </p>
+
+ <p>
+  The right way to use the primitive <code>$fn</code> is to expand
+  into the symbol itself:
+ </p>
+
+ <code>
+  (mac do body
+    `(($fn--xVrP8JItk2Ot () ,@body)))
+ </code>
+
+ <h2>Serializing Injected Values</h2>
+
+ <p>
+  Another challenge with cross-compilation is how to serialize
+  injected values.  If we’re injecting arbitrary values such as
+  functions (and macros are simply functions tagged with 'mac) into
+  the output code, then we’d need to be able to serialize functions in
+  order to save the output of the cross-compilation to load into the
+  target runtime.
+ </p>
+
+ <p>
+  However we only need to be able to cross-compile enough of arc.arc
+  so that we can run the the macro expander and the compiler in the
+  target runtime, and even when following the approach of injecting
+  macro values, the value that do get injected in arc.arc are always
+  the values of global variables.
+ </p>
+
+ <p>
+  For example, in the definition of <code>unless</code>:
+ </p>
+
+ <pre>
+  (mac unless (test . body)
+    `(,if (,no ,test) (,do ,@body)))
+ </pre>
+
+ <p>
+  The values that get injected could have been arbitrary function and
+  macro definitions, but are in fact the values of existing global values
+  (<code>if</code>, <code>no</code>, and <code>do</code>).
+ </p>
+
+ <p>
+  This suggests a trick.  When serializing the output of the
+  cross-compiler, when we come across a function value, we can look for
+  that value in the globals table and find out what its name is.  Then
+  in the serialization output we can have a secial form to refer to the
+  value of a global variable, <code>($ global if)</code>.
+ </p>
+
+ <p>
+  In the target runtime we read and execute the compiled output, form
+  by form.  Since what most of the forms do is set the values of
+  global variables (with <code>def</code>, <code>mac</code>, etc), by
+  the time we’re deserializing a reference to a value such as <code>($
+  global if)</code>, <code>if</code> will be defined as a global
+  variable and we can inject its value.
+ </p>
+
+ <h2>Demo</h2>
+
+ <p>
+  This gives us three levels of language implementation.  The first
+  level, level 0, is the host language: here Arc<sub>3.1</sub>
+  (though it could be any working implementation of Arc).
+ </p>
+
+ <p>
+  Since the macro expander macro.arc is written in Arc, we can load
+  macro.arc into the level 0 implementation.  The level 0
+  implementation doesn’t need to have the features implemented by the
+  macro expander, such as storing globals in an Arc table, or allowing
+  values to be injected by macros; but it does need to allow injected
+  values to pass through the compiler.
+ </p>
+
+ <pre>
+  --- a/ac.scm	2009-11-01 14:02:06.000000000 -0500
+  +++ b/ac.scm	2009-11-01 14:02:42.000000000 -0500
+  @@ -34,7 +34,7 @@
+            (ac (list 'no (cons (cadar s) (cdr s))) env))
+           ((eq? (xcar (xcar s)) 'andf) (ac-andf s env))
+           ((pair? s) (ac-call (car s) (cdr s) env))
+  -        (#t (err "Bad object in expression" s))))
+  +        (#t s)))
+ </pre>
+
+ <p>
+  At level 0, with the macro expander loaded, I can take some source
+  code and run it through the macro expander.  I could eval the
+  result, except that the macro expander produces primitive forms such
+  as $fn--xVrP8JItk2Ot which the Arc<sub>3.1</sub> compiler doesn’t
+  understand.  These are only needed though to allow me to
+  redefine <code>fn</code> if I wanted to, so I can convert those back
+  to a plain <code>fn</code> etc.
+ </p>
+
+ <pre>
+   Arc  ---&gt;   macro    ---&gt;  unprimitive  ---&gt;  Arc
+   (L1)       expander                           (L0)
+ </pre>
+
+ <p>
+  This fully expands all the macros in the source, producing Arc
+  code without any macros, which can then be eval’ed by the level 0
+  language.
+ </p>
+
+ <p>
+  In <a href="https://github.com/awwx/arc-globals-in-table#readme">
+  Arc Global Variables in an Arc Table</a>, I modified
+  Arc<sub>3.1</sub> to store global variables in an Arc table instead
+  of in a Racket namespace.  The level 1 language implemented by the
+  translation process above also has global variables stored in an Arc
+  table, but without having to modify the host language.  By the time
+  the host language at level 0 is eval’ing the code, references to
+  “global varaiables” at level 1 have been expand into table
+  references and the level 0 language neither knows nor cares how
+  global variables are implemented in the level 1 language.
+ </p>
+
+ <p>
+  To explore how a cross-compiler would work I wrote a simple target
+  runtime in Racket (ar.rkt), and a corresponding compiler
+  (ac-racket.arc).
+ </p>
+
+ <p>
+  The runtime leaves out functionality such as sockets and atomic not
+  needed for the demo, and it’s slow because I haven’t implemented the
+  optimizations that ac.scm in Arc<sub>3.1</sub> does such as the
+  special cases of ar-apply.
+ </p>
+
+ <p>
+  To cross-compile, the translation flow looks like:
+ </p>
+
+ <pre>
+  Arc   --->  macro   --->  ac-racket  --->  serialize
+  (L1)        expand
+ </pre>
+
+ <p>
+  The output of ac-racket is Racket source code
+  (with <code>lambda</code> and so on), represented in Arc lists, and
+  including injected values.  The serializer serializes the injected
+  values so that the output can be written out to a file.
+ </p>
+
+ <p>
+  By running arc.arc, the macro expander, and the compiler through the
+  translation process, we end up with a file containing Racket source
+  code (serialized with embedded values), an implementation in Racket
+  of the Arc compiler, macro expander, and enough of Arc to be able to
+  load and compile additional Arc code.
+ </p>
+
+ <p>
+  We can’t just run the source files through this translation process
+  by itself though.  The macro expansion of forms in arc.arc depend on
+  the macros defined earlier.  So we also need to eval the forms as
+  we’re reading them so that we can macro expand the later ones.
+ </p>
+
+ <p>
+  The solution is to run both translations together in lockstep.  We
+  read a source form, macro expand it, and then both serialize it and
+  eval it.  That way later forms can use the macros defined earlier.
+ </p>
+
+</body>
+</html>
