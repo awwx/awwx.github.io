@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width">
+  <title>A Functional Implementation of Dynamic Scope</title>
+  <link href="style.css" rel="stylesheet">
+</head>
+<body>
+
+ <h1>A Functional Implementation of Dynamic Scope</h1>
+
+ <p>
+  Dynamically scoped variables (a.k.a parameters, a.k.a. implicit
+  variables) are usually described as being implemented by
+  imperatively mutating global state (for example, see
+  <a href="http://srfi.schemers.org/srfi-39/srfi-39.html">
+   parameter objects
+  </a>).
+ </p>
+
+ <p>
+  Here I explore implementing implicit variables with a functional
+  implementatioen, by adding a hidden parameter to functions and
+  function calls.  A demo (slow but sufficient to run tests) can be
+  found on github:
+  <a href="https://github.com/awwx/arc-implicit#readme">
+   github.com/awwx/arc-implicit
+  </a>.
+ </p>
+
+ <h2>Dynamic Scope in Arc</h2>
+
+ <p>
+  While Arc<sub>3.1</sub> doesn’t explicitly expose Racket’s
+  <a href="http://docs.racket-lang.org/reference/parameters.html">
+   parameters
+  </a>, it does make use of them.  For example the standard ports are
+  dynamically scoped.  I can say:
+ </p>
+
+ <pre>
+  (def f1 ()
+    (prn "f1"))
+
+  (def f2 ()
+    (f1))
+
+  (def f3 ()
+    (tostring (f2)))
+ </pre>
+
+ <p>
+  and calling <code>(f3)</code> returns the
+  string <code>"f1\n"</code>.  <code>tostring</code> redirects the
+  standard output port to a string during the execution of its body,
+  and the execution of the functions its body calls.
+ </p>
+
+ <h2>Implementing Dynamic Scope</h2>
+
+ <p>
+  In a language without exceptions or continuations, I might
+  implement <code>call-w/stdout</code> by storing the current value of
+  the standard output port in a global variable such
+  as <code>*stdout</code> and doing something like:
+ </p>
+
+ <pre>
+  (def call-w/stdout (port f)
+    (let orig *stdout
+      (= *stdout port)
+      (let rv (f)
+        (= *stdout orig)
+        rv)))
+ </pre>
+
+ <p>
+  When we have exceptions in our language, we also need to restore the
+  original value of <code>*stdout</code> when an exception is thrown.
+ </p>
+
+ <pre>
+  (def call-w/stdout (port f)
+    (let orig *stdout
+      (after (do (= *stdout port)
+                 (f))
+             (= *stdout orig))))
+ </pre>
+
+ <p>
+  An equivalent implementation in a language that has <code>try
+  ... finally</code> such as JavaScript looks like:
+ </p>
+
+ <pre>
+  function callWithStdout(port, f) {
+    var orig = gStdout;
+    try {
+      gStdout = port;
+      return f();
+    } finally {
+      gStdout = orig;
+    }
+  }
+ </pre>
+
+ <p>
+  With continuations the implementation gets even more complicated
+  because when a captured continuation is reinvoked we want the
+  dynamic environment to be restored as well.  Arc<sub>3.1</sub>
+  doesn’t directly expose Racket’s <code>dynamic-wind</code>, but if
+  it did our implementation might look like:
+ </p>
+
+ <pre>
+  (def call-w/stdout (port f)
+    (let orig *stdout
+      (dynamic-wind (fn () (= *stdout port))
+                    f
+                    (fn () (= *stdout orig)))))
+ </pre>
+
+ <p>
+  Real implementations of dynamically scoped variables don’t use a
+  separate global variable for each dynamic variable, of course.
+  Here’s an implementation that uses a single global variable to hold
+  all the dynamic bindings:
+  <a href="http://srfi.schemers.org/srfi-39/srfi-39.html">Parameter
+  Objects</a> (in Scheme and Racket, dynamically scoped variables are
+  called “parameters”).
+ </p>
+
+ <p>
+  With <code>make-parameter</code> and <code>parameterize</code>
+  implemented and <code>stdout</code> a parameter,
+  <code>call-w/stdout</code> becomes:
+ </p>
+
+ <pre>
+  (def call-w/stdout (port f)
+    (parameterize stdout port (f)))
+ </pre>
+
+ <p>
+  While one of the things I like about Arc is that it doesn’t
+  pedantically try to force me into writing functional code when an
+  imperative style would be more straightforward, implementing dynamic
+  variables a.k.a parameters by setting and resetting a global variable
+  seems a bit ugly to me.
+ </p>
+
+ <p>
+  I don’t mind using global variables for things that are actually
+  global but I dislike using global variables for local state.
+ </p>
+
+ <p>
+  One of the ideas of Arc is that the implementation can serve as the
+  language spec [<a href="http://www.arclanguage.org/tut.txt">Arc
+  Tutorial</a>].  The imperative approach to implementing dynamic
+  scope strikes me as being particularly far from that ideal.  I have
+  some sense of how I think dynamic variables work, and I can
+  inspect the implementation to see if it looks like it’s doing what I
+  think it should, but I don’t get the sense that I <i>understand</i>
+  dynamic scope from looking at the implementation.
+ </p>
+
+ <p>
+  It gets even worse when we look at how we might
+  implement <code>dynamic-wind</code>.  The usual approach is more
+  imperatively modified global state.  (See for
+  example
+  <a href="http://www.scheme.com/tspl4/control.html#./control:h6">
+   Continuations
+  </a>
+  in the Chez Scheme manual).  To understand how parameters interact
+  with continuations, we need to look at an imperatively modified
+  global state implementation of parameters wrapped around an
+  imperatively modified global state implementation
+  of <code>dynamic-wind</code>.
+ </p>
+
+ <h2>Hidden Dynamic Parameter</h2>
+
+ <p>
+  I personally like to call dynamically scoped variables “implicit
+  variables”, because it’s as if the variable were being passed
+  implicitly to each called function.  For example, if we were to pass
+  “stdout” to every function, my example would then look like:
+ </p>
+
+ <pre>
+  (def f1 (stdout)
+    (prn stdout "f1"))
+
+  (def f2 (stdout)
+    (f1 stdout))
+
+  (def f3 (stdout)
+    (tostring (f2 stdout)))
+ </pre>
+
+ <p>
+  and <code>tostring</code> as a macro could in effect expand into
+  a <code>let</code> which gave a new binding for <code>stdout</code>:
+ </p>
+
+ <pre>
+  (def f3 (stdout)
+    (let stdout (outstring)
+      (f2 stdout)
+      (inside stdout)))
+ </pre>
+
+ <p>
+  In this language, <code>stdout</code> is a simple lexical variable
+  (which happens to be passed around a lot).  There’s no confusion
+  about how <code>stdout</code> would interact with continuations
+  here, because it isn’t any different than any other lexical
+  variable.  For example, suppose <code>f1</code>
+  called <code>foo</code> which might capture a continuation:
+ </p>
+
+ <pre>
+  (def f1 (stdout)
+    (foo stdout)
+    (prn stdout "f1"))
+ </pre>
+
+ <p>
+  If the function <code>foo</code> did capture a continutation and
+  that continuation was invoked so that <code>foo</code> returned
+  again later, what should <code>stdout</code> be
+  when <code>prn</code> is called again?  Just what it is.  The
+  original value of <code>stdout</code> passed to <code>f1</code>
+  which hasn’t changed.
+ </p>
+
+ <p>
+  We don’t need to restore <code>stdout</code> to the value that it
+  had when the continuation was captured because
+  however <code>foo</code> might choose to pass <code>stdout</code> to
+  the function it calls, that doesn’t affect <code>stdout</code> as a
+  lexical parameter of <code>f1</code>.  It still has its original
+  value.
+ </p>
+
+ <p>
+  So then I thought, what if I actually did implement implicit
+  variables (a.k.a parameters, a.k.a. dynamically scoped variables)
+  using a hidden parameter passed to every function?
+ </p>
+
+ <p>I could transform every function definition</p>
+
+ <pre>
+  (fn (a b c) ...)
+ </pre>
+
+ <p>to have an additional parameter</p>
+
+ <pre>
+  (fn ($dyn a b c) ...)
+ </pre>
+
+ <p>and every function call</p>
+
+ <pre>
+  (foo 1 2 3)
+ </pre>
+
+ <p>to include the hidden parameter:</p>
+
+ <pre>
+  (foo $dyn 1 2 3)
+ </pre>
+
+ <p>
+  My compilation stages can now start with:
+ </p>
+
+ <pre>
+    L0  --------------->  L1  ------------------>  L2
+        macro expansion       implicit expansion
+ </pre>
+
+ <p>
+  L0 is a dialect of Arc which not only has parameters, continuations,
+  complex function arguments, etc., like Arc<sub>3.1</sub> does, but
+  also
+  <a href="https://github.com/awwx/arc-globals-in-table#readme">
+   stores global variables in an Arc table
+  </a>
+  and
+  <a href="http://awwx.github.io/expanding-macros-with-values.html">
+   allows macros to be expanded with values
+  </a>
+  as well as with names.
+ </p>
+
+ <p>
+  L1 is a more primitive language.  It doesn’t have global variables
+  (those were implemented by the macro expander) or complex function
+  parameters (macro expanded) or macros (all expanded by the macro
+  expander).  Functions, conditionals, lexical variable assignments,
+  and quotation are represented by primitives
+  <code>$fn</code>, <code>$if</code>, <code>$assign</code>,
+  and <code>$quote</code>.  It does have implicit variables and
+  continuations.
+ </p>
+
+ <p>
+  L2 is an even more primitive language, not having implicit
+  variables (those got implemented by adding a hidden
+  <code>$dyn</code> parameter to every function definition and
+  every function call), but it does still rely on the target runtime
+  for continuations and tail calls.
+ </p>
+
+ <p>
+  From L2 I can go in two directions.  Like with my
+  <a href="http://awwx.github.io/arc-macro-expander.html">
+   Arc Macro Expander
+  </a>,
+  I could cross-compile to a runtime that didn’t implement Arc yet
+  (but which does have continuations and tail calls).  I can also
+  transform L2 back into Arc<sub>3.1</sub>, which isn’t particularly
+  efficient, but does let me easily run tests to see if the implicit
+  code transformation is working.
+ </p>
+
+ <pre>
+  L2 ----------->  Arc<sub>3.1</sub>
+     unprimitive
+ </pre>
+
+ <p>
+  In the L2 (implicit language) runtime, each builtin function is now
+  called with the hidden <code>$dyn</code> parameter:
+ </p>
+
+ <pre>
+  (+ $dyn 3 4)
+ </pre>
+
+ <p>
+  As Arc globals are stored in an Arc table, it’s easy enough to
+  construct an initial set of globals containing the builtin
+  functions:
+ </p>
+
+ <pre>
+  (= ir (obj + (fn ($dyn . args) (apply + args))
+             - (fn ($dyn . args) (apply - args))
+             ...))
+ </pre>
+
+ <p>
+  (Since error handlers are dynamically scoped, if I wanted to do a
+  complete implementation I’d trap Racket errors and then invoke the
+  error handler found in the dynamic environment.  Being lazy and not
+  needing it for the demo I skipped doing that part).
+ </p>
+
+ <h2>Implementing ccc</h2>
+
+ <p>
+  It’s instructive to look at the implementation of <code>ccc</code>
+  in the implicit runtime.  At the user language
+  level <code>ccc</code> is called with a single
+  argument, <code>f</code>, and at the implicit runtime implementation
+  level it also gets passed the hidden <code>$dyn</code> parameter:
+ </p>
+
+ <pre>
+   (= ir!ccc
+     (fn ($dyn f)
+       ...))
+ </pre>
+
+ <p>
+  We need to call the real <code>ccc</code>, which takes a single
+  parameter, a function which is also called with a single parameter,
+  the continuation:
+ </p>
+
+ <pre>
+   (= ir!ccc
+     (fn ($dyn f)
+       (ccc (fn (c)
+              ...))))
+ </pre>
+
+ <p>
+  We then need to call the user function <code>f</code> with the
+  continuation, and being a user function, <code>f</code> also takes
+  the hidden <code>$dyn</code> parameter.  We only have one dynamic
+  environment available to give it, so we have no choice but to use
+  the <code>$dyn</code> we have:
+ </p>
+
+ <pre>
+   (= ir!ccc
+     (fn ($dyn f)
+       (ccc (fn (c)
+              (f $dyn (fn ...))))))
+ </pre>
+
+ <p>
+  The user function gets called with a continuation.  At the user
+  language level, the user will call the continuation with a single
+  argument, the value to return from the captured continuation.  Since
+  that function call will include the hidden <code>$dyn</code>
+  parameter, the continution function we supply has to have both
+  parameters:
+ </p>
+
+ <pre>
+  (= ir!ccc
+    (fn ($dyn f)
+      (ccc (fn (c)
+             (f $dyn (fn ($dyn2 v)
+                       ...))))))
+ </pre>
+
+ <p>
+  Now we have two dynamic environments, the dynamic environment at the
+  time the continuation was captured (<code>$dyn</code>), and the
+  dynamic environment at the time the continuation is invoked
+  (<code>$dyn2</code>).  Which one is the continuation invoked with?
+ </p>
+
+ <p>
+  We don’t actually have a choice here either.  The real
+  continuation <code>c</code> is only called with a single argument
+  (the value for the continuation to return).  There’s no place
+  for <code>$dyn2</code> to go.
+ </p>
+
+ <pre>
+  (= ir!ccc
+    (fn ($dyn f)
+      (ccc (fn (c)
+             (f $dyn (fn ($dyn2 v)
+                       (c v)))))))
+ </pre>
+
+ <p>
+  So if we implement implicit variables using this hidden parameter
+  approach, we’re inexorably led to invoked continuations having the
+  dynamic environment of the captured continuation, not the dynamic
+  environment of the code calling the continuation.
+ </p>
+
+ <p>
+  Which isn’t <i>surprising</i> since it was by design that as a
+  lexical variable, the hidden <code>$dyn</code> parameter couldn’t be
+  affected by continuations.  But it’s still neat to see it fit
+  together.
+ </p>
+
+ <p>
+  We can check this with a test:
+ </p>
+
+ <pre>
+  (with (a (parameter)
+         c1 nil
+         x  0)
+    (parameterize a 123
+      (ccc (fn (c)
+             (= c1 c)
+             nil))           ; 1
+      (test (a) 123))        ; 2
+    (++ x)
+    (if (is x 1)
+      (parameterize a 456    ; 3
+        (c1 nil))))          ; 4
+ </pre>
+
+ <p>
+  The test at 2 gets run twice.  The first time when <code>ccc</code>
+  returns at 1, and naturally the value of the
+  parameter <code>a</code> is 123 as parameterized above.
+  Later <code>a</code> is parameterized to 456.  If <code>c1</code>
+  were a regular function call, <code>a</code> would have the value of
+  456 during that execution, but since <code>c1</code> is a captured
+  continuation the dynamic environment is also restored, and at
+  2 <code>a</code> is 123 again.
+ </p>
+
+ <p>
+  The test runs the same way in both Arc<sub>3.1</sub>
+  (extended with Racket’s implementation of
+  <code>parameter</code> and <code>parameterize</code> and in the
+  implicit language implementation of the demo.
+ </p>
+
+ <h2>The Implicit Runtime</h2>
+
+ <p>
+  A small complication is that in Arc values such as tables, lists and
+  strings can also be called.  If I had written a target runtime, it
+  would be easy enough to have <code>ar-apply</code> (or its
+  equivalent) accept the additional hidden parameter.  For the demo
+  running on top of Arc<sub>3.1</sub>, the quick and easy thing to do
+  was to have function calls actually expand into a call
+  to <code>implicit-call</code>... i.e., rather than having <code>(+ 3
+  4)</code> just expand into <code>(+ $dyn 3 4)</code>, instead have
+  it expand into <code>(implicit-call + $dyn 3
+  4)</code>.  <code>implicit-call</code> then handles dropping
+  the <code>$dyn</code> parameter when calling non-function values.
+  In a more serious implementation, the extra layer of indirection can
+  be avoided by having the runtime accept the <code>$dyn</code>
+  parameter for calls to non-functions.
+ </p>
+
+ <p>
+  Another complication is calling macros from the macro expander.
+  When the macro expander is loaded into L2, it naturally calls macros
+  with the hidden <code>$dyn</code> because all function calls made at
+  the L2 level have the extra parameter added.  The macro expander
+  neither knows nor cares whether implicit variables are implemented
+  with Racket parameters or with <code>$dyn</code>, it just needs to
+  call the macro function:
+ </p>
+
+ <pre>
+  (apply (rep m) args)
+ </pre>
+
+ <p>
+  However since the macro expander is written in Arc, to bootstrap
+  into running the L2 language we need to first load the macro
+  expander into Arc<sub>3.1</sub> so that we have something running to
+  cross-compile to L2.  In this scenario the macro expander is calling
+  macros loaded into L2, but is itself running in Arc<sub>3.1</sub>,
+  so it needs to explicitly pass the <code>$dyn</code> parameter that
+  the L2 macro function expect.  To do this I add a compilation option
+  to specify the dynamic environment to pass into the macro:
+ </p>
+
+ <pre>
+  (apply (rep m) compile!xcompile-dyn args)
+ </pre>
+
+ <h2>Demo</h2>
+
+ <p>
+  The demo implementation can be found on github:
+  <a href="https://github.com/awwx/arc-implicit#readme">
+   github.com/awwx/arc-implicit
+  </a>
+ </p>
+
+ <br><hr>
+
+ <p style="line-height: 1.2">
+  <small>
+    <a href="/">Home</a>
+    <br><a href="https://github.com/awwx">github/awwx</a>
+    <br><a href="mailto:andrew.wilcox@gmail.com">andrew.wilcox@gmail.com</a>
+  </small>
+ </p>
+
+</body>
+</html>
