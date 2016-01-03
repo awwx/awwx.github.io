@@ -15,9 +15,7 @@
   Dynamically scoped variables (a.k.a parameters, a.k.a. implicit
   variables) are usually described as being implemented by
   imperatively mutating global state (for example, see
-  <a href="http://srfi.schemers.org/srfi-39/srfi-39.html">
-   parameter objects
-  </a>).
+  <a href="http://srfi.schemers.org/srfi-39/srfi-39.html">parameter objects</a>).
  </p>
 
  <p>
@@ -25,18 +23,15 @@
   implementatioen, by adding a hidden parameter to functions and
   function calls.  A demo (slow but sufficient to run tests) can be
   found on github:
-  <a href="https://github.com/awwx/arc-implicit#readme">
-   github.com/awwx/arc-implicit
-  </a>.
+  <a href="https://github.com/awwx/arc-implicit#readme">github.com/awwx/arc-implicit</a>.
  </p>
 
  <h2>Dynamic Scope in Arc</h2>
 
  <p>
   While Arc<sub>3.1</sub> doesn’t explicitly expose Racket’s
-  <a href="http://docs.racket-lang.org/reference/parameters.html">
-   parameters
-  </a>, it does make use of them.  For example the standard ports are
+  <a href="http://docs.racket-lang.org/reference/parameters.html">parameters</a>,
+  it does make use of them.  For example the standard ports are
   dynamically scoped.  I can say:
  </p>
 
@@ -172,9 +167,7 @@
   implement <code>dynamic-wind</code>.  The usual approach is more
   imperatively modified global state.  (See for
   example
-  <a href="http://www.scheme.com/tspl4/control.html#./control:h6">
-   Continuations
-  </a>
+  <a href="http://www.scheme.com/tspl4/control.html#./control:h6">Continuations</a>
   in the Chez Scheme manual).  To understand how parameters interact
   with continuations, we need to look at an imperatively modified
   global state implementation of parameters wrapped around an
@@ -290,13 +283,9 @@
   L0 is a dialect of Arc which not only has parameters, continuations,
   complex function arguments, etc., like Arc<sub>3.1</sub> does, but
   also
-  <a href="https://github.com/awwx/arc-globals-in-table#readme">
-   stores global variables in an Arc table
-  </a>
+  <a href="https://github.com/awwx/arc-globals-in-table#readme">stores global variables in an Arc table</a>
   and
-  <a href="http://awwx.github.io/expanding-macros-with-values.html">
-   allows macros to be expanded with values
-  </a>
+  <a href="http://awwx.github.io/expanding-macros-with-values.html">allows macros to be expanded with values</a>
   as well as with names.
  </p>
 
@@ -321,9 +310,7 @@
 
  <p>
   From L2 I can go in two directions.  Like with my
-  <a href="http://awwx.github.io/arc-macro-expander.html">
-   Arc Macro Expander
-  </a>,
+  <a href="http://awwx.github.io/arc-macro-expander.html">Arc Macro Expander</a>,
   I could cross-compile to a runtime that didn’t implement Arc yet
   (but which does have continuations and tail calls).  I can also
   transform L2 back into Arc<sub>3.1</sub>, which isn’t particularly
@@ -550,9 +537,7 @@
 
  <p>
   The demo implementation can be found on github:
-  <a href="https://github.com/awwx/arc-implicit#readme">
-   github.com/awwx/arc-implicit
-  </a>
+  <a href="https://github.com/awwx/arc-implicit#readme">github.com/awwx/arc-implicit</a>
  </p>
 
  <br><hr>
