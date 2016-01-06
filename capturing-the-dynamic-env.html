@@ -21,7 +21,7 @@
 
  <p>
   This suggests it might be possible to capture the dynamic
-  environment, that is, to be able to call a function <code>f</code>
+  environment: to be able to call a function <code>f</code>
   not with the current dynamic environment (which is what usually
   happens when we call a function), but with a dynamic environment
   captured earlier.
@@ -95,6 +95,11 @@
   but with the <code>capture-dyn</code> it should
   print <code>1</code>, what <code>a</code> was set to when
   the <code>capture-dyn</code> was called.
+ </p>
+
+ <p>
+  Let me see, it will take one argument, the function which gets
+  called with the captured dynamic environment:
  </p>
 
  <pre>
