@@ -140,9 +140,9 @@
  <p>
   If I were to return from the <code>ccc</code> function, that would
   also return from the <code>ccc</code> and then call <code>f</code>,
-  which I don’t want to do.  I don’t want to call <code>f</code> now
-  while executing <code>capture-dyn</code>, I only want to call it
-  later.  So I need some way to avoid returning from
+  which I don’t want to do.  I don’t want to call <code>f</code>
+  <i>now</i> while executing <code>capture-dyn</code>, I only want to
+  call it later.  So I need some way to avoid returning from
   the <code>ccc</code> function.  I can use <code>catch
   ... throw</code> to tunnel the continuation out to me:
  </p>
@@ -195,8 +195,17 @@
  </pre>
 
  <p>
-  And I need to get that continuation into the expression
-  where <code>f</code> is called somehow:
+  The second <code>ccc</code> captures the continuation where the next
+  thing to do is to return from the function.  If <code>cr</code> is
+  invoked with a value, that value with in effect be returned by the
+  second <code>ccc</code> form, and thus returned from the function.
+ </p>
+
+ <p>
+  So if I call <code>f</code>, and pass its return value
+  to <code>cr</code>, that will then return the value returned
+  by <code>f</code> from the function I’m returning
+  from <code>capture-dyn</code>.
  </p>
 
  <pre>
@@ -209,18 +218,13 @@
  </pre>
 
  <p>
-  If I can pass <code>cr</code> in there, the expression
-  <code>(cr (f))</code> will invoke the return continuation
-  with the return value from <code>f</code>, in effect returning
-  it from the second <code>ccc</code>, which in turn returns the
-  return value from the function returned by <code>capture-dyn</code>.
- </p>
-
- <p>
-  If I invoke <code>cf</code> with a value, that value will in effect
-  be returned by the first <code>ccc</code> form.  So I can pass in
-  the return continuation, and grab it as it gets returned by the
-  first <code>ccc</code>.
+  How can I get <code>cr</code> up into the first part?  I
+  have <code>cf</code>, and I’ll be invoking it to
+  call <code>f</code>.  Before I just did <code>(cf nil)</code>.  If I
+  invoke <code>cf</code> with a value, that value will in effect be
+  returned by the first <code>ccc</code> form.  So I can pass in the
+  return continuation <code>cr</code>, and grab it as it gets returned
+  by the first <code>ccc</code>.
  </p>
 
  <pre>
