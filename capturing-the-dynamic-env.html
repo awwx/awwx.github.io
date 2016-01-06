@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width">
+  <title>Capturing the Dynamic Environment</title>
+  <link href="style.css" rel="stylesheet">
+</head>
+<body>
+
+ <h1>Capturing the Dynamic Environment</h1>
+
+ <p>
+  Previously in
+  <a href="functional-implementation-dynamic-scope.html">A Functional Implementation of Dynamic Scope</a>
+  I noted that when a continuation is invoked, the dynamic environment
+  is reset to be what it was at the time the continuation was
+  captured.
+ </p>
+
+ <p>
+  This suggests it might be possible to capture the dynamic
+  environment, that is, to be able to call a function <code>f</code>
+  not with the current dynamic environment (which is what usually
+  happens when we call a function), but with a dynamic environment
+  captured earlier.
+ </p>
+
+ <p>
+  Why might that be useful?  Consider for example a typical pattern of
+  registering a callback JavaScript:
+ </p>
+
+ <pre>
+  fetch(url, function (err, result) {
+    if (err) {
+      reportError(err);
+      return;
+    }
+    ... do something with result...
+  });
+ </pre>
+
+ <p>
+  Why does the callback <i>have</i> to have the <code>err</code>
+  parameter?  Why isn’t it possible for errors to be propagated to an
+  enclosing exception handler?
+ </p>
+
+ <pre>
+  try {
+    fetch(url, function (result) {...});
+  } catch (err) {
+    reportError(err);
+  }
+ </pre>
+
+ <p>
+  The <code>fetch</code> function registers the callback and returns.
+  Execution passes out of the <code>try...catch</code> and eventually
+  returns to the event loop.  Later the callback gets called (when the
+  fetch operation has succeeded or failed), but by then
+  the <code>try...catch</code> is no longer active.  In JavaScript
+  there’s no way to capture the dynamic environment of the exception
+  handler to have it apply later.
+ </p>
+
+ <p>
+  We have to add a lot of extra code to ensure errors are handled in
+  all cases.  This is helped some with promises, but it’s still a
+  pain.
+ </p>
+
+ <p>
+  So let’s try creating a <code>capture-dyn</code> that when passed a
+  function, returns a function that when called, calls the original
+  function with the dynamic environment captured at the
+  time <code>capture-dyn</code> execution (instead of the dynamic
+  environment of the caller).
+ </p>
+
+ <pre>
+  (let a (parameter)
+    (let df (parameterize a 1
+              (capture-dyn (fn ()
+                             (prn (a)))))
+      (parameterize a 2
+        (df))))
+ </pre>
+
+ <p>
+  Without the <code>capture-dyn</code> this would
+  print <code>2</code>, what <code>a</code> is set to from the caller;
+  but with the <code>capture-dyn</code> it should
+  print <code>1</code>, what <code>a</code> was set to when
+  the <code>capture-dyn</code> was called.
+ </p>
+
+ <pre>
+  (def capture-dyn (f)
+    ...)
+ </pre>
+
+ <p>
+  We want to capture the continuation where the next thing that
+  happens is calling <code>f</code>, since that’s the action we want
+  to have happen when the function returned
+  by <code>capture-dyn</code> is called.  For example, if we used
+  a <code>do</code>:
+ </p>
+
+ <pre>
+  (def capture-dyn (f)
+    ...
+    (do (ccc ...)
+        (f)))
+ </pre>
+
+ <p>
+  Invoking the continuation captured by the <code>ccc</code> will in
+  effect return from the <code>ccc</code> form, and so when the
+  continuation is invoked the next thing that happens is
+  that <code>f</code> gets called.  Since that’s the continuation to
+  call <code>f</code>, I’ll call it <code>cf</code>:
+ </p>
+
+ <pre>
+  (def capture-dyn (f)
+    ...
+    (do (ccc (fn (cf) ...))
+        (f)))
+ </pre>
+
+ <p>
+  If I were to return from the <code>ccc</code> function, that would
+  also return from the <code>ccc</code> and then call <code>f</code>,
+  which I don’t want to do.  I don’t want to call <code>f</code> now
+  while executing <code>capture-dyn</code>, I only want to call it
+  later.  So I need some way to avoid returning from
+  the <code>ccc</code> function.  I can use <code>catch
+  ... throw</code> to tunnel the continuation out to me:
+ </p>
+
+ <pre>
+  (def capture-dyn (f)
+    (let cf (catch (do (ccc (fn (cf) (throw cf)))
+                       (f)))
+      ...))
+ </pre>
+
+ <p>
+  I want <code>capture-dyn</code> to return a function that when
+  called, invokes the continuation.
+ </p>
+
+ <pre>
+  (def capture-dyn (f)
+    (let cf (catch (do (ccc (fn (cf) (throw cf)))
+                       (f)))
+      (fn ()
+        (cf nil))))
+ </pre>
+
+ <p>
+  Well, so far so good.  I can now call the function returned
+  by <code>capture-dyn</code>, and it will call <code>f</code> with
+  the captured dynamic environment.
+ </p>
+
+ <p>
+  However, it won’t return!  Invoking a continuation is like a “goto”,
+  it’s one-way.  After the call to <code>(f)</code> execution
+  continues from <i>that</i> point, and so <code>capture-dyn</code>
+  returns <i>again</i>.
+ </p>
+
+ <p>
+  To go back to returning from the function, I’ll need a continuation
+  for the point where the returned function is returning, which I’ll
+  call <code>cr</code>:
+ </p>
+
+ <pre>
+  (def capture-dyn (f)
+    (let cf (catch (do (ccc (fn (cf) (throw cf)))
+                       (f)))
+      (fn ()
+        (ccc (fn (cr) ...)))))
+ </pre>
+
+ <p>
+  And I need to get that continuation into the expression
+  where <code>f</code> is called somehow:
+ </p>
+
+ <pre>
+  (def capture-dyn (f)
+    (let cf (catch ...get cr somehow...
+                   (do (ccc (fn (cf) (throw cf)))
+                       (cr (f))))
+      (fn ()
+        (ccc (fn (cr) ...)))))
+ </pre>
+
+ <p>
+  If I can pass <code>cr</code> in there, the expression
+  <code>(cr (f))</code> will invoke the return continuation
+  with the return value from <code>f</code>, in effect returning
+  it from the second <code>ccc</code>, which in turn returns the
+  return value from the function returned by <code>capture-dyn</code>.
+ </p>
+
+ <p>
+  If I invoke <code>cf</code> with a value, that value will in effect
+  be returned by the first <code>ccc</code> form.  So I can pass in
+  the return continuation, and grab it as it gets returned by the
+  first <code>ccc</code>.
+ </p>
+
+ <pre>
+  (def capture-dyn (f)
+    (let cf (catch (let cr (ccc (fn (cf) (throw cf)))
+                     (cr (f))))
+      (fn ()
+        (ccc (fn (cr)
+               (cf cr))))))
+ </pre>
+
+ <p>
+  Aha!  It works!
+ </p>
+
+ <p>
+  I can tighten this up by noting that <code>(fn (x) (foo x))</code>
+  is the same as just <code>foo</code>.  Thus,
+ </p>
+
+ <pre>
+  (def capture-dyn (f)
+    (let cf (catch (let cr (ccc throw)
+                     (cr (f))))
+      (fn ()
+        (ccc cf))))
+ </pre>
+
+ <p>
+  When I first wrote this function, I originally had
+ </p>
+
+ <pre>
+  (def capture-dyn (f)
+    (let cf (catch ((ccc throw) (f)))  ; dangerous
+      (fn ()
+        (ccc cf))))
+ </pre>
+
+ <p>
+  But I realized this was assuming left-to-right evaluation order of
+  function calls.  (I was assuming that <i>first</i>
+  <code>(ccc throw)</code> was going to be executed, and <i>then</i>
+  <code>(f)</code>).  It’s safer to make the execution order explicit.
+ </p>
+
+ <p>
+  I admit I find the definition inscrutable.  I’d be happy to find a
+  way to break it down into pieces that were easier to understand.
+  But if not, maybe it’s just one of those things where you need to
+  follow the logic through to see what’s happening.
+ </p>
+
+<br><hr>
+
+ <p style="line-height: 1.2">
+  <small>
+    <a href="/">Home</a>
+    <br><a href="https://github.com/awwx">github/awwx</a>
+    <br><a href="mailto:andrew.wilcox@gmail.com">andrew.wilcox@gmail.com</a>
+  </small>
+ </p>
+
+</body>
+</html>
