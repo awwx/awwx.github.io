@@ -40,15 +40,13 @@
  </p>
 
  <pre>
-  (prn (+ 3 4))
- </pre>
+  (prn (+ 3 4))</pre>
 
  <p>becomes</p>
 
  <pre>
   (+ 3 4 (fn (v)
-           (prn v halt)))
- </pre>
+           (prn v halt)))</pre>
 
  <p>
   This transformation can be done automatically by a compiler.  You
@@ -76,20 +74,21 @@
   (def ccc (f k1)
     (f (fn (v k2)
          (k1 v))
-       k1))
- </pre>
+       k1))</pre>
 
  <p>
   It’s easy to see the “goto” nature of <code>ccc</code> here.
-  Usually a function like the <code>(fn (v k2) ...)</code> above would
+  Usually a function like <code>(fn (v k2) ...)</code> above would
   call its <code>k2</code> argument to pass its return value on to its
   caller.  However invoking a continuation doesn’t return!  The return
   continuation <code>k2</code> is abandoned, and the captured
   continuation <code>k1</code> is called instead.
  </p>
 
+ <h2>dynamic-wind</h2>
+
  <p>
-  This is a primitive form of <code>ccc</code>, one that
+  That was a primitive form of <code>ccc</code>, one that
   ignores <code>dynamic-wind</code>.  Arc<sub>3.1</sub> doesn’t
   expose <code>dynamic-wind</code> directly, but it does make use of
   it.
@@ -127,8 +126,10 @@
   else, it just continues execution in <code>k1</code>.
  </p>
 
+ <h2>Implementing dynamic-wind</h2>
+
  <p>
-  However, once we have a primitive form of <code>ccc</code> (whether
+  Once we have a primitive form of <code>ccc</code> (whether
   by transforming code into CPS style or in some other way), we can
   then implement a full version of <code>ccc</code> which cooperates
   with <code>dynamic-wind</code>.  See for example the implementation
@@ -149,13 +150,18 @@
   In <a href="functional-implementation-dynamic-scope.html">A
   Functional Implementation of Dynamic Scope</a>
   I complained that I found the imperative implementation hard to
-  follow.  I wrote a compilation pass which added a hidden dynamic
+  follow.
+ </p>
+
+ <p>
+  To implement dynamically scoped parameters in a functional way,
+  I wrote a compilation pass which added a hidden dynamic
   parameter to every function call and function definition.
+ </p>
 
  <pre>
     L0  --------------->  L1  ------------------>  L2
-        macro expansion       implicit expansion
- </pre>
+        macro expansion       implicit expansion</pre>
 
  <p>
   The L2 language implements dynamically scoped parameters, but still
@@ -169,8 +175,7 @@
 
  <pre>
   L2  --------------> L3
-      CPS conversion
- </pre>
+      CPS conversion</pre>
 
  <p>
   The L3 language has dynamically scoped parameters and primitive
@@ -178,12 +183,15 @@
   full continuations.
  </p>
 
+ <h2>A function implementation</h2>
+
  <p>
   The usual implementation of <code>dynamic-wind</code> can’t use
   parameters because parameters haven’t been implemented yet --
   they’re usually implemented on top of <code>dynamic-wind</code>.
-  But I do have parameters already.  So with parameters, I wondered if
-  I could implement a functional version of <code>dynamic-wind</code>?
+  But with L3 I have parameters already.  So with parameters, I
+  wondered if I could implement a functional version
+  of <code>dynamic-wind</code>?
  </p>
 
  <p>
@@ -199,8 +207,7 @@
   (let ans (body)
     (= winders (cdr winders))
     (out)
-    ans)
- </pre>
+    ans)</pre>
 
  <p>
   first <code>winders</code> is extended, and then <code>body</code>
@@ -212,8 +219,7 @@
   (let ans (parameterize winders (cons (cons in out) (winders))
              (body))
     (out)
-    ans)
- </pre>
+    ans)</pre>
 
  <p>
   In the implementation of <code>call/cc</code> (<code>ccc</code> in
@@ -284,8 +290,7 @@
            (parameterize winders (cons (cons xin xout) (winders))
              (body))
         (xout)
-        r))))
- </pre>
+        r))))</pre>
 
  <p>
   And the implementation of <code>do-wind</code> is simplified because
