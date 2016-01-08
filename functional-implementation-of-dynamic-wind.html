@@ -146,13 +146,18 @@
   In <a href="functional-implementation-dynamic-scope.html">A
   Functional Implementation of Dynamic Scope</a>
   I complained that I found the imperative implementation hard to
-  follow.  I wrote a compilation pass which adds a hidden dynamic
+  follow.  I wrote a compilation pass which added a hidden dynamic
   parameter to every function call and function definition.
 
  <pre>
     L0  --------------->  L1  ------------------>  L2
         macro expansion       implicit expansion
  </pre>
+
+ <p>
+  The L2 language implements dynamically scoped parameters, but still
+  relies on the target runtime to support continuations.
+ </p>
 
  <p>
   By using Matt Might’s CPS conversion code, I can extend my
@@ -174,15 +179,15 @@
   The usual implementation of <code>dynamic-wind</code> can’t use
   parameters because parameters haven’t been implemented yet --
   they’re usually implemented on top of <code>dynamic-wind</code>.
-  But I do have parameters already.  So with parameters, could I
-  implement a functional version of <code>dynamic-wind</code>?
+  But I do have parameters already.  So with parameters, I wondered if
+  I could implement a functional version of <code>dynamic-wind</code>?
  </p>
 
  <p>
   Looking at the sample implementation of <code>dynamic-wind</code>
   <a href="http://www.scheme.com/tspl4/control.html#./control:h6">Chez
   Scheme manual</a>, it looks like a lot of the work being done is
-  manipulating the dynamic state of the winders.  For example, in the
+  manipulating the dynamic state of the winders.  For example, the
   code for <code>dynamic-wind</code> (converted to Arc) looks like:
  </p>
 
@@ -208,19 +213,27 @@
  </pre>
 
  <p>
-  In the implementation of <code>call/cc</code> (<code>ccc</code>),
-  one of the things that the call to <code>do-wind</code> does by the
-  end is set <code>winders</code> to <code>save</code>, that is, to
-  reset <code>winders</code> to the value they had at the time the
-  continuation was captured.  But we know that invoking a continuation
-  already resets the dynamic environment.  If <code>winders</code> is
-  a parameter, it will automatically be reset when the continuation is
-  invoked.  So whatever else <code>do-wind</code> might need to do, it
-  doesn’t need to reset <code>winder</code> for <code>ccc</code>.
+  In the implementation of <code>call/cc</code> (<code>ccc</code> in
+  Arc), one of the things that the call to <code>do-wind</code> does
+  by the end is set <code>winders</code> to <code>save</code>, that
+  is, to reset <code>winders</code> to the value they had at the time
+  the continuation was captured.
  </p>
 
  <p>
-  <code>do-wind</code> does a couple things.  It finds the common tail between the old winders and the new winders, and walks from the old winders to the tail calling the <code>out</code> functions, and walks back from the tail to the beginning of the new winders calling the <code>in</code> functions.
+  But we know that invoking a continuation already resets the dynamic
+  environment.  If <code>winders</code> is a parameter, it will
+  automatically be reset when the continuation is invoked.  So
+  whatever else <code>do-wind</code> might need to do, it doesn’t need
+  to reset <code>winder</code> for <code>ccc</code>.
+ </p>
+
+ <p>
+  <code>do-wind</code> does a couple things.  It finds the common tail
+  between the old winders and the new winders, and walks from the old
+  winders to the tail calling the <code>out</code> functions, and
+  walks back from the tail to the beginning of the new winders calling
+  the <code>in</code> functions.
  </p>
 
  <p>
@@ -235,7 +248,8 @@
 
  <p>
   When parameters are implemented on top of <code>dynamic-wind</code>,
-  when the <code>in</code> and <code>out</code> thunks are called the parameters  will also be reset to the values they had at the time the
+  when the <code>in</code> and <code>out</code> thunks are called the
+  parameters will also be reset to the values they had at the time the
   <code>dynamic-wind</code> was called.
  </p>
 
@@ -286,14 +300,14 @@
  </p>
 
  <p>
-  The demo runs extremely slowly.  I was also experimenting with how
+  (The demo runs extremely slowly.  I was also experimenting with how
   error handling could be defined in Arc (and thus how Racket errors
   thrown from runtime functions such as <code>car</code> could be
   forwarded to the Arc layer), and I needed an extra layer of
   indirection for callable Arc objects such as tables.  All of which
   probably would be faster in a runtime that supported the CPS
   language directly, instead of a emulation layer running on top of
-  Arc.  But, sufficient to run tests and see what works.
+  Arc.  But, sufficient to run tests and see what works).
  </p>
 
  <p>
@@ -305,7 +319,7 @@
   interaction of continuations, <code>dynamic-wind</code>, and
   parameters)... but naturally there may be some more subtle
   interaction that I didn’t think of and so didn’t write a test for.
-  Bug reports are welcome :)
+  Bug reports are welcome! :)
  </p>
 
  <br><hr>
