@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width">
+  <title>And a Functional Implementation of Dynamic Wind</title>
+  <link href="style.css" rel="stylesheet">
+</head>
+<body>
+
+ <h1>And a Functional Implementation of Dynamic Wind</h1>
+
+ <p>
+  Here I present a functional implementation of
+  <code>dynamic-wind</code>, with code in
+  <a href="https://github.com/awwx/arc-cps">github.com/awwx/arc-cps</a>.
+ </p>
+
+ <p>
+  The are many ways to
+  <a href="http://link.springer.com/article/10.1023/A:1010016816429">implement
+  continuations</a>.
+ </p>
+
+ <p>
+  Perhaps the most straightforward approach is to transform your
+  program into
+  <a href="https://en.wikipedia.org/wiki/Continuation-passing_style">continuation
+  passing style</a> (CPS).
+ </p>
+
+ <p>
+  In CPS, rather than returning a value from a function call, instead
+  you pass an additional parameter, a function to be called with the
+  return value.  Thus
+ </p>
+
+ <pre>
+  (prn (+ 3 4))
+ </pre>
+
+ <p>becomes</p>
+
+ <pre>
+  (+ 3 4 (fn (v)
+           (prn v halt)))
+ </pre>
+
+ <p>
+  This transformation can be done automatically by a compiler.  You
+  get to write your program in the usual way (the “before” code in the
+  example above), and the compiler converts it to CPS (the “after”
+  code in the example above).
+ </p>
+
+ <p>
+  Matt Might has a terrific article showing how to implement such a
+  CPS-conversion phase:
+  <a href="http://matt.might.net/articles/cps-conversion/">How
+  to compile with continuations</a>.
+ </p>
+
+ <p>
+  In a parallel article
+  <a href="http://matt.might.net/articles/by-example-continuation-passing-style/">By
+  example: Continuation-passing style in JavaScript</a>,
+  Matt Might also describes how implementing <code>ccc</code> in CPS
+  becomes very simple:
+ </p>
+
+ <pre>
+  (def ccc (f k1)
+    (f (fn (v k2)
+         (k1 v))
+       k1))
+ </pre>
+
+ <p>
+  It’s easy to see the “goto” nature of <code>ccc</code> here.
+  Usually a function like the <code>(fn (v k2) ...)</code> above would
+  call its <code>k2</code> argument to pass its return value on to its
+  caller.  However invoking a continuation doesn’t return!  The return
+  continuation <code>k2</code> is abandoned, and the captured
+  continuation <code>k1</code> is called instead.
+ </p>
+
+ <p>
+  This is a primitive form of <code>ccc</code>, one that
+  ignores <code>dynamic-wind</code>.  Arc<sub>3.1</sub> doesn’t
+  expose <code>dynamic-wind</code> directly, but it does make use of
+  it.
+ </p>
+
+ <p>
+  Consider for example <code>w/outfile</code> which opens a file for
+  output, executes its body with a port to write to the file, and
+  automatically closes the file when the body exits.  It does this by
+  calling <code>after</code>, which is similar to the
+  <code>try ... finally</code> clause in other languages.
+ </p>
+
+ <p>
+  The file will be closed automatically regardless of how the body
+  exits, whether it simply returns, or if an error is thrown, or if
+  the body is exited with a continuation.  (<code>catch
+  ... throw</code> is implemented using a continuation, so
+  a <code>throw</code> that exits the body will close the file too).
+ </p>
+
+ <p>
+  <code>after</code> is implemented using <code>protect</code>, which
+  in implemented in <code>ac.scm</code>
+  via <code>dynamic-wind</code>.  <code>dynamic-wind</code> lets you
+  intervene when a continuation is passing in to or out of a body of
+  code.
+ </p>
+
+ <p>
+  The primitive form of <code>ccc</code> doesn’t do any of that.
+  Invoking a primitive continuation is an unconditional goto.  In the
+  CPS implementation of <code>ccc</code> I showed above,
+  <code>(k1 v)</code> doesn’t stop along the way to close files or anything
+  else, it just continues execution in <code>k1</code>.
+ </p>
+
+ <p>
+  However, once we have a primitive form of <code>ccc</code> (whether
+  by transforming code into CPS style or in some other way), we can
+  then implement a full version of <code>ccc</code> which cooperates
+  with <code>dynamic-wind</code>.  See for example the implementation
+  given in the
+  <a href="http://www.scheme.com/tspl4/control.html#./control:h6">Chez
+  Scheme manual</a>.
+ </p>
+
+ <p>
+  And, the usual implementation story continues, once we have full
+  continuations and <code>dynamic-wind</code>, we can then use those
+  to implement parameters.  (See for example
+  <a href="http://srfi.schemers.org/srfi-39/srfi-39.html">parameter
+  objects</a>).
+ </p>
+
+ <p>
+  In <a href="functional-implementation-dynamic-scope.html">A
+  Functional Implementation of Dynamic Scope</a>
+  I complained that I found the imperative implementation hard to
+  follow.  I wrote a compilation pass which adds a hidden dynamic
+  parameter to every function call and function definition.
+
+ <pre>
+    L0  --------------->  L1  ------------------>  L2
+        macro expansion       implicit expansion
+ </pre>
+
+ <p>
+  By using Matt Might’s CPS conversion code, I can extend my
+  compiler with another pass:
+ </p>
+
+ <pre>
+  L2  --------------> L3
+      CPS conversion
+ </pre>
+
+ <p>
+  The L3 language has dynamically scoped parameters and primitive
+  continuations, but doesn’t yet have <code>dynamic-wind</code> or
+  full continuations.
+ </p>
+
+ <p>
+  The usual implementation of <code>dynamic-wind</code> can’t use
+  parameters because parameters haven’t been implemented yet --
+  they’re usually implemented on top of <code>dynamic-wind</code>.
+  But I do have parameters already.  So with parameters, could I
+  implement a functional version of <code>dynamic-wind</code>?
+ </p>
+
+ <p>
+  Looking at the sample implementation of <code>dynamic-wind</code>
+  <a href="http://www.scheme.com/tspl4/control.html#./control:h6">Chez
+  Scheme manual</a>, it looks like a lot of the work being done is
+  manipulating the dynamic state of the winders.  For example, in the
+  code for <code>dynamic-wind</code> (converted to Arc) looks like:
+ </p>
+
+ <pre>
+  (= winders (cons (cons in out) winders))
+  (let ans (body)
+    (= winders (cdr winders))
+    (out)
+    ans)
+ </pre>
+
+ <p>
+  first <code>winders</code> is extended, and then <code>body</code>
+  is called, and then <code>winders</code> is restored to its previous
+  value.  If <code>winders</code> were a parameter, this could be:
+ </p>
+
+ <pre>
+  (let ans (parameterize winders (cons (cons in out) (winders))
+             (body))
+    (out)
+    ans)
+ </pre>
+
+ <p>
+  In the implementation of <code>call/cc</code> (<code>ccc</code>),
+  one of the things that the call to <code>do-wind</code> does by the
+  end is set <code>winders</code> to <code>save</code>, that is, to
+  reset <code>winders</code> to the value they had at the time the
+  continuation was captured.  But we know that invoking a continuation
+  already resets the dynamic environment.  If <code>winders</code> is
+  a parameter, it will automatically be reset when the continuation is
+  invoked.  So whatever else <code>do-wind</code> might need to do, it
+  doesn’t need to reset <code>winder</code> for <code>ccc</code>.
+ </p>
+
+ <p>
+  <code>do-wind</code> does a couple things.  It finds the common tail between the old winders and the new winders, and walks from the old winders to the tail calling the <code>out</code> functions, and walks back from the tail to the beginning of the new winders calling the <code>in</code> functions.
+ </p>
+
+ <p>
+  Along the way it resets <code>winders</code> to the value it has
+  when <code>in</code> and <code>out</code> are called inside
+  of <code>dynamic-wind</code>, so that in each call
+  to <code>in</code> and <code>out</code>, <code>winders</code> has
+  the value it had at the time <code>dynamic-wind</code> was called.
+  (This is important in case the <code>in</code> or <code>out</code>
+  code itself captures a continuation).
+ </p>
+
+ <p>
+  When parameters are implemented on top of <code>dynamic-wind</code>,
+  when the <code>in</code> and <code>out</code> thunks are called the parameters  will also be reset to the values they had at the time the
+  <code>dynamic-wind</code> was called.
+ </p>
+
+ <p>
+  So, if I reset the dynamic environment in calls to <code>in</code>
+  and <code>out</code>, that will get <code>dynamic-wind</code> to
+  work correctly with parameters, and, with <code>winders</code>
+  implemented as a parameter, will also get the <code>winders</code>
+  correctly reset without <code>do-wind</code> having to do it.
+ </p>
+
+ <p>
+  Fortunately I just happen to have a function to
+  <a href="capturing-the-dynamic-env.html">capture
+  the dynamic environment</a> :-)
+ </p>
+
+ <p>
+  With <code>capture-dyn</code>, my implementation
+  of <code>dynamic-wind</code> now looks like:
+ </p>
+
+ <pre>
+  (def dynamic-wind (in body out)
+    (with (xin  (capture-dyn in)
+           xout (capture-dyn out))
+      (xin)
+      (let r
+           (parameterize winders (cons (cons xin xout) (winders))
+             (body))
+        (xout)
+        r))))
+ </pre>
+
+ <p>
+  And the implementation of <code>do-wind</code> is simplified because
+  it no longer needs to manipulate <code>winders</code>.
+ </p>
+
+ <p>
+  Here’s the final version:
+  <a href="https://github.com/awwx/arc-cps/blob/67cc6e5fc8260c24eb5d9f876b24bc3fd52615be/arc/ccc.arc">ccc.arc</a>
+ </p>
+
+ <p>
+  And a demo with the CPS conversion pass can be found here:
+  <a href="https://github.com/awwx/arc-cps">github.com/awwx/arc-cps</a>
+ </p>
+
+ <p>
+  The demo runs extremely slowly.  I was also experimenting with how
+  error handling could be defined in Arc (and thus how Racket errors
+  thrown from runtime functions such as <code>car</code> could be
+  forwarded to the Arc layer), and I needed an extra layer of
+  indirection for callable Arc objects such as tables.  All of which
+  probably would be faster in a runtime that supported the CPS
+  language directly, instead of a emulation layer running on top of
+  Arc.  But, sufficient to run tests and see what works.
+ </p>
+
+ <p>
+  So is my functional implementation of <code>dynamic-wind</code>
+  correct?  I’m not entirely sure.  I did write
+  <a href="https://github.com/awwx/arc-cps/blob/67cc6e5fc8260c24eb5d9f876b24bc3fd52615be/runtime-tests/wind.t">some
+  tests</a>, and they do run the same in my implementation as they do
+  in Arc<sub>3.1</sub> (i.e. using Racket’s interpretation of the
+  interaction of continuations, <code>dynamic-wind</code>, and
+  parameters)... but naturally there may be some more subtle
+  interaction that I didn’t think of and so didn’t write a test for.
+  Bug reports are welcome :)
+ </p>
+
+ <br><hr>
+
+ <p style="line-height: 1.2">
+  <small>
+    <a href="/">Home</a>
+    <br><a href="https://github.com/awwx">github/awwx</a>
+    <br><a href="mailto:andrew.wilcox@gmail.com">andrew.wilcox@gmail.com</a>
+  </small>
+ </p>
+
+</body>
+</html>
