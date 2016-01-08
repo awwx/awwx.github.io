@@ -183,15 +183,18 @@
   full continuations.
  </p>
 
- <h2>A function implementation</h2>
+ <h2>A functional implementation</h2>
 
  <p>
   The usual implementation of <code>dynamic-wind</code> can’t use
   parameters because parameters haven’t been implemented yet --
   they’re usually implemented on top of <code>dynamic-wind</code>.
-  But with L3 I have parameters already.  So with parameters, I
-  wondered if I could implement a functional version
-  of <code>dynamic-wind</code>?
+  But with L3 I have parameters already.
+ </p>
+
+ <p>
+  So with parameters, I wondered if I could implement a functional
+  version of <code>dynamic-wind</code>?
  </p>
 
  <p>
@@ -335,6 +338,7 @@
  <p style="line-height: 1.2">
   <small>
     <a href="/">Home</a>
+    <br><a href="https://twitter.com/awwx">@awwx</a>
     <br><a href="https://github.com/awwx">github/awwx</a>
     <br><a href="mailto:andrew.wilcox@gmail.com">andrew.wilcox@gmail.com</a>
   </small>
