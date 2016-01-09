@@ -39,8 +39,7 @@
       return;
     }
     ... do something with result...
-  });
- </pre>
+  });</pre>
 
  <p>
   Why does the callback <i>have</i> to have the <code>err</code>
@@ -53,8 +52,7 @@
     fetch(url, function (result) {...});
   } catch (err) {
     reportError(err);
-  }
- </pre>
+  }</pre>
 
  <p>
   The <code>fetch</code> function registers the callback and returns.
@@ -73,7 +71,7 @@
  </p>
 
  <p>
-  So let’s try creating a <code>capture-dyn</code> that when passed a
+  So let me try creating a <code>capture-dyn</code> that when passed a
   function, returns a function that when called, calls the original
   function with the dynamic environment captured at the
   time <code>capture-dyn</code> execution (instead of the dynamic
@@ -86,8 +84,7 @@
               (capture-dyn (fn ()
                              (prn (a)))))
       (parameterize a 2
-        (df))))
- </pre>
+        (df))))</pre>
 
  <p>
   Without the <code>capture-dyn</code> this would
@@ -98,20 +95,19 @@
  </p>
 
  <p>
-  Let me see, it will take one argument, the function which gets
-  called with the captured dynamic environment:
+  <code>capture-dyn</code> will take one argument, the function which
+  gets called with the captured dynamic environment:
  </p>
 
  <pre>
   (def capture-dyn (f)
-    ...)
- </pre>
+    ...)</pre>
 
  <p>
   We want to capture the continuation where the next thing that
   happens is calling <code>f</code>, since that’s the action we want
   to have happen when the function returned
-  by <code>capture-dyn</code> is called.  For example, if we used
+  by <code>capture-dyn</code> is called.  For example, if I used
   a <code>do</code>:
  </p>
 
@@ -119,8 +115,7 @@
   (def capture-dyn (f)
     ...
     (do (ccc ...)
-        (f)))
- </pre>
+        (f)))</pre>
 
  <p>
   Invoking the continuation captured by the <code>ccc</code> will in
@@ -134,8 +129,7 @@
   (def capture-dyn (f)
     ...
     (do (ccc (fn (cf) ...))
-        (f)))
- </pre>
+        (f)))</pre>
 
  <p>
   If I were to return from the <code>ccc</code> function, that would
@@ -151,8 +145,7 @@
   (def capture-dyn (f)
     (let cf (catch (do (ccc (fn (cf) (throw cf)))
                        (f)))
-      ...))
- </pre>
+      ...))</pre>
 
  <p>
   I want <code>capture-dyn</code> to return a function that when
@@ -164,11 +157,10 @@
     (let cf (catch (do (ccc (fn (cf) (throw cf)))
                        (f)))
       (fn ()
-        (cf nil))))
- </pre>
+        (cf nil))))</pre>
 
  <p>
-  Well, so far so good.  I can now call the function returned
+  So far so good.  I can now call the function returned
   by <code>capture-dyn</code>, and it will call <code>f</code> with
   the captured dynamic environment.
  </p>
@@ -191,13 +183,12 @@
     (let cf (catch (do (ccc (fn (cf) (throw cf)))
                        (f)))
       (fn ()
-        (ccc (fn (cr) ...)))))
- </pre>
+        (ccc (fn (cr) ...)))))</pre>
 
  <p>
   The second <code>ccc</code> captures the continuation where the next
   thing to do is to return from the function.  If <code>cr</code> is
-  invoked with a value, that value with in effect be returned by the
+  invoked with a value, that value will in effect be returned by the
   second <code>ccc</code> form, and thus returned from the function.
  </p>
 
@@ -214,8 +205,7 @@
                    (do (ccc (fn (cf) (throw cf)))
                        (cr (f))))
       (fn ()
-        (ccc (fn (cr) ...)))))
- </pre>
+        (ccc (fn (cr) ...)))))</pre>
 
  <p>
   How can I get <code>cr</code> up into the first part?  I
@@ -233,8 +223,7 @@
                      (cr (f))))
       (fn ()
         (ccc (fn (cr)
-               (cf cr))))))
- </pre>
+               (cf cr))))))</pre>
 
  <p>
   Aha!  It works!
@@ -250,8 +239,7 @@
     (let cf (catch (let cr (ccc throw)
                      (cr (f))))
       (fn ()
-        (ccc cf))))
- </pre>
+        (ccc cf))))</pre>
 
  <p>
   When I first wrote this function, I originally had
@@ -261,8 +249,7 @@
   (def capture-dyn (f)
     (let cf (catch ((ccc throw) (f)))  ; dangerous
       (fn ()
-        (ccc cf))))
- </pre>
+        (ccc cf))))</pre>
 
  <p>
   But I realized this was assuming left-to-right evaluation order of
