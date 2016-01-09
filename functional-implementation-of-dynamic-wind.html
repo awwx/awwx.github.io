@@ -57,7 +57,7 @@
 
  <p>
   Matt Might has a terrific article showing how to implement such a
-  CPS-conversion phase:
+  CPS-conversion compiler phase:
   <a href="http://matt.might.net/articles/cps-conversion/">How
   to compile with continuations</a>.
  </p>
@@ -88,10 +88,13 @@
  <h2>dynamic-wind</h2>
 
  <p>
-  That was a primitive form of <code>ccc</code>, one that
-  ignores <code>dynamic-wind</code>.  Arc<sub>3.1</sub> doesn’t
-  expose <code>dynamic-wind</code> directly, but it does make use of
-  it.
+  The definition of <code>ccc</code> I gave above is a primitive form
+  of <code>ccc</code>, one that ignores <code>dynamic-wind</code>.
+ </p>
+
+ <p>
+  Arc<sub>3.1</sub> doesn’t expose <code>dynamic-wind</code> directly,
+  but it does make use of it.
  </p>
 
  <p>
@@ -129,13 +132,18 @@
  <h2>Implementing dynamic-wind</h2>
 
  <p>
+  The usual story for implementing <code>dynamic-wind</code> goes like
+  this.
+ </p>
+
+ <p>
   Once we have a primitive form of <code>ccc</code> (whether
   by transforming code into CPS style or in some other way), we can
   then implement a full version of <code>ccc</code> which cooperates
-  with <code>dynamic-wind</code>.  See for example the implementation
+  with <code>dynamic-wind</code>.  (See for example the implementation
   given in the
   <a href="http://www.scheme.com/tspl4/control.html#./control:h6">Chez
-  Scheme manual</a>.
+  Scheme manual</a>).
  </p>
 
  <p>
@@ -259,16 +267,17 @@
  </p>
 
  <p>
-  When parameters are implemented on top of <code>dynamic-wind</code>,
-  when the <code>in</code> and <code>out</code> thunks are called the
-  parameters will also be reset to the values they had at the time the
-  <code>dynamic-wind</code> was called.
+  Now, in the usual implementation where parameters are implemented on
+  top of <code>dynamic-wind</code>, parameters will also be reset to
+  the values they had at the time the
+  <code>dynamic-wind</code> was called when the <code>in</code>
+  and <code>out</code> thunks are executed.
  </p>
 
  <p>
   So, if I reset the dynamic environment in calls to <code>in</code>
   and <code>out</code>, that will get <code>dynamic-wind</code> to
-  work correctly with parameters, and, with <code>winders</code>
+  work the same way with parameters, and, with <code>winders</code>
   implemented as a parameter, will also get the <code>winders</code>
   correctly reset without <code>do-wind</code> having to do it.
  </p>
@@ -280,8 +289,8 @@
  </p>
 
  <p>
-  With <code>capture-dyn</code>, my implementation
-  of <code>dynamic-wind</code> now looks like:
+  With <code>capture-dyn</code>, my implementation of
+  <code>dynamic-wind</code> now looks like:
  </p>
 
  <pre>
@@ -301,7 +310,7 @@
  </p>
 
  <p>
-  Here’s the final version:
+  Here’s my final version:
   <a href="https://github.com/awwx/arc-cps/blob/67cc6e5fc8260c24eb5d9f876b24bc3fd52615be/arc/ccc.arc">ccc.arc</a>
  </p>
 
@@ -311,7 +320,7 @@
  </p>
 
  <p>
-  (The demo runs extremely slowly.  I was also experimenting with how
+  (The demo runs very slowly, as I was also experimenting with how
   error handling could be defined in Arc (and thus how Racket errors
   thrown from runtime functions such as <code>car</code> could be
   forwarded to the Arc layer), and I needed an extra layer of
@@ -323,7 +332,7 @@
 
  <p>
   So is my functional implementation of <code>dynamic-wind</code>
-  correct?  I’m not entirely sure.  I did write
+  correct?  I’m not entirely sure!  I did write
   <a href="https://github.com/awwx/arc-cps/blob/67cc6e5fc8260c24eb5d9f876b24bc3fd52615be/runtime-tests/wind.t">some
   tests</a>, and they do run the same in my implementation as they do
   in Arc<sub>3.1</sub> (i.e. using Racket’s interpretation of the
